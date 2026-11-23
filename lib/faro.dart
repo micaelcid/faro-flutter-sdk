@@ -9,6 +9,7 @@ export './src/faro_asset_tracking.dart';
 export './src/faro_navigation_observer.dart' show FaroNavigationObserver;
 export './src/faro_router_tracker.dart' show FaroRouterTracker;
 export './src/faro_user_interaction_widget.dart';
+export './src/integrations/faro_http_client.dart' show FaroHttpClient;
 export './src/integrations/http_tracking_client.dart' show FaroHttpOverrides;
 export './src/models/models.dart';
 export './src/offline_transport/offline_transport.dart';

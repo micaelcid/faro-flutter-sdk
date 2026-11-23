@@ -24,7 +24,12 @@ Future<void> faroSessionEngineHarnessMain(List<String> args) {
   return runSessionEngineHarness(args);
 }
 
-void main() async {
+// On web, `Faro.runWithHttpTracking` traces `package:http` requests, where
+// `HttpOverrides` has no effect. It must wrap the binding initialization.
+// On mobile it only calls `_main`.
+void main() => Faro.runWithHttpTracking(_main);
+
+Future<void> _main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // IMPORTANT: Set HttpOverrides BEFORE creating any http.Client instances!

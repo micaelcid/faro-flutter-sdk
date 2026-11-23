@@ -13,6 +13,8 @@ import 'package:faro/src/offline_transport/internet_connectivity_service.dart';
 import 'package:faro/src/transport/batch_transport.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -187,6 +189,96 @@ void main() {
       );
 
       verifyZeroInteractions(nativeMethods);
+    });
+
+    group('HTTP tracking', () {
+      late List<http.BaseRequest> sent;
+      late http.Client browserClient;
+
+      // Stands in for the browser: `runWithHttpTracking` wraps whichever
+      // client the surrounding zone provides.
+      Future<void> runTracked(Future<void> Function() body) {
+        return http.runWithClient(
+          () => Faro.runWithHttpTracking(body),
+          () => browserClient,
+        );
+      }
+
+      Future<void> initFaro({List<RegExp>? corsUrls}) {
+        return Faro().init(
+          optionsConfiguration: FaroConfig(
+            appName: 'WebTestApp',
+            appEnv: 'test',
+            apiKey: 'key',
+            collectorUrl: null,
+            transports: [],
+            persistSession: false,
+            persistUser: false,
+            enableUiActivityMonitoring: false,
+            propagateTraceHeaderCorsUrls: corsUrls,
+          ),
+        );
+      }
+
+      setUp(() {
+        sent = [];
+        browserClient = MockClient((request) async {
+          sent.add(request);
+          return http.Response('ok', 200);
+        });
+      });
+
+      final sameOrigin = Uri.base.resolve('/api/users');
+      final crossOrigin = Uri.parse('https://api.example.com/users');
+      final traceparent = matches(
+        RegExp(r'^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'),
+      );
+
+      test('traces http.get and propagates to the page origin', () async {
+        await initFaro();
+
+        await runTracked(() async {
+          final response = await http.get(sameOrigin);
+          expect(response.body, 'ok');
+        });
+
+        expect(sent.single.headers['traceparent'], traceparent);
+      });
+
+      test('does not send traceparent to another origin', () async {
+        await initFaro();
+
+        await runTracked(() => http.get(crossOrigin));
+
+        expect(sent.single.headers.containsKey('traceparent'), isFalse);
+      });
+
+      test('sends traceparent to configured cross-origin URLs', () async {
+        await initFaro(corsUrls: [RegExp(r'^https://api\.example\.com/')]);
+
+        await runTracked(() => http.get(crossOrigin));
+
+        expect(sent.single.headers['traceparent'], traceparent);
+      });
+
+      test('http.Client() is traced, FaroHttpClient() only once', () async {
+        await initFaro();
+
+        await runTracked(() async {
+          expect(http.Client(), isA<FaroHttpClient>());
+          await FaroHttpClient().get(sameOrigin);
+        });
+
+        expect(sent.single.headers['traceparent'], traceparent);
+      });
+
+      test('FaroHttpClient traces without the zone', () async {
+        await initFaro();
+
+        await FaroHttpClient(browserClient).get(sameOrigin);
+
+        expect(sent.single.headers['traceparent'], traceparent);
+      });
     });
   });
 }

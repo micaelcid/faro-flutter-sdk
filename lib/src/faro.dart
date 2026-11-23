@@ -13,7 +13,9 @@ import 'package:faro/src/device_info/dynamic_device_state_provider.dart';
 import 'package:faro/src/device_info/platform_info_provider.dart';
 import 'package:faro/src/device_info/session_attributes_provider.dart';
 import 'package:faro/src/faro_widgets_binding_observer.dart';
+import 'package:faro/src/integrations/faro_http_client.dart';
 import 'package:faro/src/integrations/flutter_error_integration.dart';
+import 'package:faro/src/integrations/http_trace_propagation_policy.dart';
 import 'package:faro/src/integrations/http_tracking_filter.dart';
 import 'package:faro/src/integrations/http_url_redaction_policy.dart';
 import 'package:faro/src/integrations/native_integration.dart';
@@ -201,6 +203,9 @@ class Faro {
     pod
         .resolve(httpUrlRedactionPolicyProvider)
         .configure(optionsConfiguration.sensitiveHttpQueryParameters);
+    pod
+        .resolve(httpTracePropagationPolicyProvider)
+        .configure(optionsConfiguration.propagateTraceHeaderCorsUrls);
     _dataCollectionPolicy = await DataCollectionPolicyFactory().create();
 
     final nativeChannel = _nativeChannel ??= FaroNativeMethods();
@@ -338,6 +343,25 @@ class Faro {
       unawaited(transport.replayCachedData());
     }
   }
+
+  /// Runs [body] so that `package:http` requests are traced on Flutter web.
+  ///
+  /// Browsers do not use `dart:io`, so `FaroHttpOverrides` has no effect on
+  /// web. Wrap the whole of `main` in this call, including
+  /// `WidgetsFlutterBinding.ensureInitialized()`, because Flutter runs
+  /// callbacks in the zone where the binding was initialized:
+  ///
+  /// ```dart
+  /// void main() => Faro.runWithHttpTracking(() async {
+  ///   WidgetsFlutterBinding.ensureInitialized();
+  ///   await Faro().runApp(...);
+  /// });
+  /// ```
+  ///
+  /// Covers `http.Client()` and the `http.get`-style functions. On every
+  /// other platform this only calls [body].
+  static R runWithHttpTracking<R>(R Function() body) =>
+      runWithFaroHttpTracking(body);
 
   Future<void> runApp({
     required FaroConfig optionsConfiguration,

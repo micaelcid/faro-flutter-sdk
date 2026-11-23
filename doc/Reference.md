@@ -1066,6 +1066,10 @@ HttpOverrides.global = FaroHttpOverrides(HttpOverrides.current);
 
 > **Important**: HTTP tracking only captures requests made from the Flutter/Dart layer (using packages like `http`, `dio`, etc.). Native HTTP calls made directly from Android/iOS code are not tracked.
 
+On Flutter web, `HttpOverrides` has no effect. Wrap `main` in
+`Faro.runWithHttpTracking` to trace `package:http` requests there. See
+[HTTP tracking on web](./web.md#http-tracking) for setup and limits.
+
 ### HTTP span names and method attributes
 
 Automatically instrumented HTTP spans use the instrumentation scope

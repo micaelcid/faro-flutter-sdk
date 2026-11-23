@@ -10,33 +10,88 @@ has been tested on web yet.
 
 ## Setup
 
-Initialize Faro the same way as on mobile, with no web-specific code:
+Initialize Faro the same way as on mobile, and wrap `main` in
+`Faro.runWithHttpTracking` to trace HTTP requests:
 
 ```dart
-// Safe to keep on web, but it does nothing there (see below).
-HttpOverrides.global = FaroHttpOverrides(HttpOverrides.current);
+void main() => Faro.runWithHttpTracking(() async {
+  WidgetsFlutterBinding.ensureInitialized();
 
-// Also safe on web. Offline caching does nothing there.
-Faro().transports.add(OfflineTransport());
+  // Traces HTTP on mobile. Safe to keep on web, where it does nothing.
+  HttpOverrides.global = FaroHttpOverrides(HttpOverrides.current);
 
-await Faro().runApp(
-  optionsConfiguration: FaroConfig(
-    // ...
-  ),
-  appRunner: () => runApp(const MyApp()),
-);
+  // Also safe on web. Offline caching does nothing there.
+  Faro().transports.add(OfflineTransport());
+
+  await Faro().runApp(
+    optionsConfiguration: FaroConfig(
+      // ...
+    ),
+    appRunner: () => runApp(const MyApp()),
+  );
+});
 ```
 
-> **HTTP requests are not tracked on web.** Assigning `HttpOverrides.global`
-> does not fail on web, but it does nothing. Browsers do not use `dart:io`'s
-> `HttpClient`, so requests are not captured and **no HTTP telemetry is sent
-> to Grafana**. Do not expect network requests from web builds to appear in
-> your dashboards.
+## HTTP tracking
+
+Browsers do not use `dart:io`'s `HttpClient`, so `FaroHttpOverrides` cannot
+see requests on web. `Faro.runWithHttpTracking` traces requests made with
+[`package:http`](https://pub.dev/packages/http) instead. On mobile it only
+calls its callback, so the same `main` works on every platform.
+
+> **The call must wrap `WidgetsFlutterBinding.ensureInitialized()`.** Flutter
+> runs gesture and frame callbacks in the zone where the binding was
+> initialized. If the binding is initialized first, requests made from those
+> callbacks are not traced.
+
+What is traced:
+
+| Request made with | Traced on web |
+| --- | --- |
+| `http.get`, `http.post` and the other top-level functions | Yes |
+| `http.Client()` | Yes |
+| `FaroHttpClient(myClient)` | Yes, with or without `runWithHttpTracking` |
+| A client the app constructs itself, such as `BrowserClient()` | No. Wrap it in `FaroHttpClient` |
+| `dio`, `Image.network` and other code that does not use `package:http` | No |
+
+Flutter does not guarantee the zone of every callback. If some requests are
+missing, create one `FaroHttpClient()` and pass it to the code that makes them.
+
+Requests produce the same spans and `faro.tracing.fetch` events as on mobile,
+with the same `ignoreUrls` and URL sanitization. The differences are:
+
+- `http.user_agent` is empty, because the browser sets the user agent.
+- `http.response_size` is `-1` when the browser hides `content-length`, which
+  it does for cross-origin responses that do not expose that header.
+- A request blocked by CORS or by the network fails without a status code.
+
+### Trace headers and CORS
+
+On mobile every tracked request carries a `traceparent` header. In a browser
+that header makes a cross-origin request need a CORS preflight, and **the
+browser blocks the request if the server does not allow the header**. So on
+web the header is only added to:
+
+- requests to the page's own origin, and
+- cross-origin URLs matching `propagateTraceHeaderCorsUrls`.
+
+```dart
+FaroConfig(
+  // ...
+  propagateTraceHeaderCorsUrls: [RegExp(r'^https://api\.example\.com/')],
+)
+```
+
+List only servers that return `traceparent` in
+`Access-Control-Allow-Headers`. Other cross-origin requests are still traced,
+but their spans are not linked to a backend trace.
 
 ## What works on web
 
 - Logs, events and custom measurements
-- Manually created tracing spans (not automatic HTTP spans, see above)
+- HTTP network tracking for `package:http`, once `main` is wrapped (see
+  [HTTP tracking](#http-tracking))
+- Manually created tracing spans
 - Exceptions and automatic Flutter error capture
 - Session tracking, user identity, navigation, user actions and asset tracking
 - App lifecycle events (`app_lifecycle_changed`), sent when Flutter reports a
@@ -46,7 +101,7 @@ await Faro().runApp(
 
 | Feature                                  | Behavior on web                                    |
 | ---------------------------------------- | -------------------------------------------------- |
-| HTTP network tracking                    | Not available. `HttpOverrides` does nothing on web and no HTTP telemetry is sent |
+| HTTP requests not made with `package:http` | Not tracked. This includes `dio` and `Image.network` |
 | `OfflineTransport`                       | Does nothing. Web has no file system to cache payloads in, so nothing is cached or replayed. Adding it is harmless |
 | CPU, memory, refresh rate and ANR vitals | Not collected. The related config flags are ignored |
 | Cold and warm start measurements         | Not reported. Cold start depends on native code, and a warm start on web would only cover the time to the next frame |

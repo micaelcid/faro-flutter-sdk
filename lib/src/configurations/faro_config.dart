@@ -37,6 +37,7 @@ class FaroConfig {
     this.fetchVitalsInterval = const Duration(seconds: 30),
     BatchConfig? batchConfig,
     this.ignoreUrls,
+    this.propagateTraceHeaderCorsUrls,
     Set<String>? sensitiveHttpQueryParameters,
     this.maxBufferLimit = 30,
     this.collectorHeaders,
@@ -81,6 +82,17 @@ class FaroConfig {
   final int maxBufferLimit;
   final Duration? fetchVitalsInterval;
   final List<RegExp>? ignoreUrls;
+
+  /// Cross-origin URLs that receive a `traceparent` header on Flutter web.
+  ///
+  /// Web only. Same-origin requests always receive the header. A cross-origin
+  /// request only receives it when its URL matches one of these patterns,
+  /// because the browser blocks the request unless that server allows the
+  /// `traceparent` header in `Access-Control-Allow-Headers`. Requests that do
+  /// not match are still traced, without being linked to a backend trace.
+  ///
+  /// Ignored on mobile, where every tracked request receives the header.
+  final List<RegExp>? propagateTraceHeaderCorsUrls;
 
   /// Additional query parameter names whose values Faro redacts in HTTP URLs.
   ///
